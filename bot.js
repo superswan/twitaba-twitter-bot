@@ -21,13 +21,13 @@ const banner =`\n
 console.log(banner)
 
 // includes and config
-//const fs = require('fs');
+const fs = require('fs');
 const config = require('./config.js');
 const { ETwitterStreamEvent, TwitterApi } = require('twitter-api-v2');
 
 // Bot parameters
-const twitterUser = '@80386cpu';                                                // bot username
-fortunes = ["Bad Luck","Average Luck","Good Luck","Excellent Luck","Reply hazy, try again","Godly Luck","Very Bad Luck","Outlook good","Better not tell you now","You will meet a dark handsome stranger","ｷﾀ━━━━━━(ﾟ∀ﾟ)━━━━━━ !!!!","( ´,_ゝ`)","Good news will come to you by mail"]
+const twitterUser = config.botname;                                                // bot username
+const fortunes = ["Bad Luck","Average Luck","Good Luck","Excellent Luck","Reply hazy, try again","Godly Luck","Very Bad Luck","Outlook good","Better not tell you now","You will meet a dark handsome stranger","ｷﾀ━━━━━━(ﾟ∀ﾟ)━━━━━━ !!!!","( ´,_ゝ`)","Good news will come to you by mail"];
 
 // Twitter API
 const userClient = new TwitterApi({                                             // set in config.js
@@ -39,7 +39,7 @@ const userClient = new TwitterApi({                                             
 
 const client = new TwitterApi(config.bearer_token);                             // read-only? uses bearer token
 
-// 0Auth 1.0 Authentication (User Context)
+// 0Auth2 Authentication
 // https://github.com/twitterdev/Twitter-API-v2-sample-code/blob/main/Manage-Tweets/create_tweet.js
 const axios = require('axios');
 const crypto = require('crypto');
@@ -86,7 +86,7 @@ async function requestToken() {
 
   const req = await axios.post(requestTokenURL, {}, {
     headers: {
-      Authorization : authHeader["Authorization"]
+      Authorization : authHeader.Authorization
     },
   });
   if (req) {
@@ -110,7 +110,7 @@ async function accessToken({
   const path = `https://api.twitter.com/oauth/access_token?oauth_verifier=${verifier}&oauth_token=${oauth_token}`
   const req = await axios.post(path, {},{
     headers: {
-      Authorization : authHeader["Authorization"]
+      Authorization : authHeader.Authorization
     }
   });
   if (req.data) {
@@ -139,7 +139,7 @@ async function getRequest({
   
       responseType: 'json',
       headers: {
-        Authorization : authHeader["Authorization"],
+        Authorization : authHeader.Authorization,
         'user-agent': "v2CreateTweetJS",
         'content-type': "application/json",
         'accept': "application/json"
@@ -258,7 +258,15 @@ async function listener() {
     });
     // Enable auto reconnect
     stream.autoReconnect = true;
-    var roulette_lobby = []
+
+    var roulette_lobby;
+    if (fs.existsSync('lobby.json')) {
+        let jsonData = fs.readFileSync('lobby.json');
+        roulette_lobby = JSON.parse(rawdata);
+        console.log("Loaded previous lobbies from file");
+    } else {
+      roulette_lobby = [];
+    }
 
     console.log("Listener Stream Started...")
     stream.on(ETwitterStreamEvent.Data, async tweet => {
@@ -269,14 +277,15 @@ async function listener() {
         var name = tweet.includes.users[0].username;
         var userId = tweet.includes.users[0].id;
         var fortune;
+        var hasFortune;
 
         // give fortune on #fortune 
         if (text.includes("#fortune")) {
-            var fortuneNum = randInt(0,fortunes.length)
-            fortune = fortunes[fortuneNum]
-            var hasFortune = true;         
+            var fortuneNum = randInt(0,fortunes.length);
+            fortune = fortunes[fortuneNum];
+            hasFortune = true;         
         } else {
-            var hasFortune = false;
+            hasFortune = false;
         }
 
         if (text.includes("!roll") || text.includes("/roll")) {
@@ -300,6 +309,7 @@ async function listener() {
             var lobby = roulette_lobby.filter(lobby => lobby.id === lobbyId)[0]
             var lobbyParticipants = lobby.data.participants
             var rollId = randInt(1000000,9999999);
+            var userRoll;
             
             if (lobbyExists) {
                 var userExistsInLobby = lobbyParticipants.find(user => user.id === userId ? true : false)
@@ -316,7 +326,7 @@ async function listener() {
                         return false;
                     }
                 } else {
-                    var userRoll = { 
+                    userRoll = { 
                         "id": userId, "rollData": 
                         {
                             "username": name,
@@ -328,7 +338,7 @@ async function listener() {
                     lobbyParticipants.push(userRoll)
                 }
             } else {
-                var userRoll = { 
+                userRoll = { 
                     "id": userId, "rollData": 
                     {
                         "username": name,
@@ -341,6 +351,9 @@ async function listener() {
             }
 
             sendTweet(rollId,name,tweet_id,fortune,oAuthAccessToken)
+            fs.writeFile('lobby.json', JSON.stringify(roulette_lobby, null, 4), (err) => {
+              if (err) throw err;
+            });
             console.log(`[${lobbyId}] User @${name} rolled ${rollId}: ${text}`)
 
         } else if (hasFortune) {
