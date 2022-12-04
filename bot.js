@@ -30,13 +30,6 @@ const twitterUser = config.botname;                                             
 const fortunes = ["Bad Luck","Average Luck","Good Luck","Excellent Luck","Reply hazy, try again","Godly Luck","Very Bad Luck","Outlook good","Better not tell you now","You will meet a dark handsome stranger","ｷﾀ━━━━━━(ﾟ∀ﾟ)━━━━━━ !!!!","( ´,_ゝ`)","Good news will come to you by mail"];
 
 // Twitter API
-const userClient = new TwitterApi({                                             // set in config.js
-    appKey: config.consumer_key,
-    appSecret: config.consumer_secret,
-    accessToken: config.access_token,
-    accessSecret: config.access_token_secret,
-});
-
 const client = new TwitterApi(config.bearer_token);                             // read-only? uses bearer token
 
 // 0Auth2 Authentication
@@ -140,7 +133,7 @@ async function getRequest({
       responseType: 'json',
       headers: {
         Authorization : authHeader.Authorization,
-        'user-agent': "v2CreateTweetJS",
+        'user-agent': "TWITABA Bot",
         'content-type': "application/json",
         'accept': "application/json"
       }
@@ -150,6 +143,38 @@ async function getRequest({
     } else {
       //throw new Error('Unsuccessful request');
       console.log("oops")
+    }
+  }
+
+async function getRequestEndpoint({
+    oauth_token,
+    oauth_token_secret
+  }, data, _endpointURL) {
+  
+    const token = {
+      key: oauth_token,
+      secret: oauth_token_secret
+    };
+  
+    const authHeader = oauth.toHeader(oauth.authorize({
+      url: _endpointURL,
+      method: 'POST'
+    }, token));
+  
+    const req = await axios.post(_endpointURL, data, {
+  
+      responseType: 'json',
+      headers: {
+        Authorization : authHeader.Authorization,
+        'user-agent': "TWITABA Bot",
+        'content-type': "application/json",
+        'accept': "application/json"
+      }
+    });
+    if (req.data) {
+      return req.data;
+    } else {
+      throw new Error('Unsuccessful request');
     }
   }
 
@@ -187,28 +212,22 @@ function checkWin(postId) {
         console.log("Winrar! " + postId)
         if (search_pattern.test(postId.slice(0,-1))) {                          // trips
             if (search_pattern.test(postId.slice(0,-2))) {
-                winGet = 'quads!'                                               // quads
-                console.log("☆ quads!")
-                
-                return winGet;
+                winGet = '☆ quads!'                                               // quads
             } else {
-                winGet = 'trips!'
-                console.log("☆ trips!")
-            
-                return winGet;
+                winGet = '☆ trips!'
             }
         } else {
-            winGet = "dubs! check 'em"                                          // dubs
-            console.log("☆ dubs! check 'em")
-            
-            return winGet;
+            winGet = "☆ dubs! check 'em ;)"                                          // dubs
         }
+
+        return winGet;
     } else {
         return false;
     }
 }
 
-async function sendTweet(roll, username, tweetId, fortune,oAuthAccessToken) {
+async function sendTweet(roll, username, tweetId, fortune, oAuthAccessToken) {
+    const botUserInfo = await client.v2.userByUsername(twitterUser.replace('@', ''));
     var hasFortune = false;
     if (typeof fortune === 'undefined') {
         hasFortune = false;
@@ -227,18 +246,33 @@ async function sendTweet(roll, username, tweetId, fortune,oAuthAccessToken) {
     if (hasFortune) {
         replyMsg = fortuneText + replyMsg;
     }
-    //await authClient.v2.reply(replyMsg, tweetId)
     const data = {
         "text": replyMsg,
         "reply" : {"in_reply_to_tweet_id": tweetId}
     }
     const response = await getRequest(oAuthAccessToken, data);
+    let responseTweetId = response.data.id
+
+    if (winGet) {
+        // Retweet roll result post
+        let data = {
+          "tweet_id": responseTweetId
+        }
+        let response = await getRequestEndpoint(oAuthAccessToken, data, `https://api.twitter.com/2/users/${botUserInfo.data.id}/retweets`)
+
+        // Like tweet being replied to
+        data = {
+          "tweet_id": tweetId
+        }
+        response = await getRequestEndpoint(oAuthAccessToken, data, `https://api.twitter.com/2/users/${botUserInfo.data.id}/likes`)
+    }
 }
 
 // main loop
 async function listener() {
-    const oAuthAccessToken = await getAuth();
 
+    const oAuthAccessToken = await getAuth();
+    
     const rules = await client.v2.streamRules();
     if (rules.data?.length) {
         console.log("Clearing previous Stream Rules")
@@ -262,14 +296,23 @@ async function listener() {
     var roulette_lobby;
     if (fs.existsSync('lobby.json')) {
         let jsonData = fs.readFileSync('lobby.json');
-        roulette_lobby = JSON.parse(rawdata);
+        roulette_lobby = JSON.parse(jsonData);
         console.log("Loaded previous lobbies from file");
     } else {
       roulette_lobby = [];
     }
 
     console.log("Listener Stream Started...")
+    
+
     stream.on(ETwitterStreamEvent.Data, async tweet => {
+       const isRetweet = tweet.data.referenced_tweets?.some(tweet => tweet.type === 'retweeted') ?? false;
+        var isQuoteStatus = tweet.data.is_quote_status;
+        
+        if (isRetweet || isQuoteStatus) {
+            return;
+        }
+      
         //console.log(JSON.stringify(tweet,null,2))                             // debug
         var conversation_id = tweet.data.conversation_id;
         var tweet_id = tweet.data.id;
@@ -350,7 +393,7 @@ async function listener() {
                 lobbyParticipants.push(userRoll)
             }
 
-            sendTweet(rollId,name,tweet_id,fortune,oAuthAccessToken)
+            sendTweet(rollId, name, tweet_id,fortune,oAuthAccessToken)
             fs.writeFile('lobby.json', JSON.stringify(roulette_lobby, null, 4), (err) => {
               if (err) throw err;
             });
